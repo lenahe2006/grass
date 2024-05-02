@@ -1,0 +1,300 @@
+#Flattening of Species Abundance Tables
+library(vegan) 
+otu = read.table('otu.txt', header=T, sep="\t", quote = "", row.names=1, comment.char="",stringsAsFactors = FALSE) 
+colSums(otu)
+otu_Flattening = as.data.frame(t(rrarefy(t(otu), min(colSums(otu)))))
+colSums(otu_Flattening)
+write.table (otu_Flattening, file =" otu_Flattening.csv",sep =",", quote =FALSE) 
+
+#Calculation of Alpha Diversity
+
+library(vegan)
+library(picante)      
+
+alpha_diversity <- function(x, tree = NULL) {
+  observed_species <- estimateR(x)[1, ]
+  Chao1 <- estimateR(x)[2, ]
+  ACE <- estimateR(x)[4, ]
+  Shannon <- diversity(x, index = 'shannon',base = 2)
+  Simpson <- diversity(x, index = 'simpson')   
+  goods_Coverage <- 1 - rowSums(x == 1) / rowSums(x)
+  
+  Shannon <- sprintf("%0.4f", Shannon)
+  Simpson <- sprintf("%0.4f", Simpson)
+  goods_Coverage <- sprintf("%0.4f", goods_Coverage)
+  
+  
+  result <- data.frame(observed_species, ACE,Chao1, Shannon, Simpson, goods_Coverage)
+  
+  if (!is.null(tree)) {
+    PD_whole_tree <- pd(x, tree, include.root = FALSE)[1]
+    names(PD_whole_tree) <- 'PD_whole_tree'
+    result <- cbind(result, PD_whole_tree)
+    
+    result <- data.frame(observed_species, ACE,Chao1, Shannon, Simpson,
+                         PD_whole_tree ,goods_Coverage)
+  }
+  
+  result
+}
+
+otu <- read.csv('test_otu.csv', row.names = 1, sep = ',', stringsAsFactors = FALSE, check.names = FALSE)
+otu <- t(otu)
+
+alpha <- alpha_diversity (otu)
+write.csv(alpha, 'alpha_diversity.csv', quote = FALSE)
+
+alpha <- read.csv('alpha_diversity.csv', row.names = 1, sep = ',', stringsAsFactors = FALSE, check.names = FALSE)
+
+install.packages()
+library(ggplot2)
+p<- ggplot(data=alpha)+ 
+  geom_boxplot(mapping=aes(x=Group,y=ACE,colour =Group), 
+               alpha = 0.5,
+               size=1.5,
+               width = 0.3)+ 
+  geom_jitter(mapping=aes(x=Group,y=ACE,colour = Group), 
+              alpha = 0.3,size=3)+
+  scale_color_manual(limits=c("A","B"), 
+                     values=c("#85B22E","#5F80B4"))+ 
+  theme_classic()+
+  labs(title="ACE",x="Group",y="ACE")+ 
+  theme(plot.title = element_text(size = 15,
+                                  colour = "black",
+                                  hjust = 0.5),
+        axis.title.y = element_text(size = 15, 
+                                    # family = "myFont", 
+                                    color = "black",
+                                    face = "bold", 
+                                    vjust = 1.9, 
+                                    hjust = 0.5, 
+                                    angle = 90),
+        legend.title = element_text(color="black", 
+                                    size=15, 
+                                    face="bold"),
+        legend.text = element_text(color="black", 
+                                   size = 10, 
+                                   face = "bold"),
+        axis.text.x = element_text(size = 13, 
+                                   color = "black# 颜色
+                                   vjust = 0.5, 
+                                   hjust = 0.5, 
+                                   angle = 0), 
+        axis.text.y = element_text(size = 13,  
+                                   color = "black",
+                                   face = "bold", 
+                                   vjust = 0.5, 
+                                   hjust = 0.5, 
+                                   angle = 0) 
+  )
+p
+res <- wilcox.test(ACE ~ Group, data = alpha, paired = TRUE)
+res
+
+#Calculation of Beta Diversity
+
+library(vegan)
+otu <- read.csv('otu.csv', row.names = 1, sep = ',', stringsAsFactors = FALSE, check.names = FALSE)
+otu <- t(otu)
+df<-otu
+
+bray_dist<-vegdist(df,method = "bray")
+
+library(ape)
+df.pcoa<-pcoa(bray_dist,correction = "cailliez")
+df.plot<-data.frame(df.pcoa$vectors)
+head(df.plot)
+
+library(ggplot2)
+x_label<-round(df.pcoa$values$Rel_corr_eig[1]*100,2)
+y_label<-round(df.pcoa$values$Rel_corr_eig[2]*100,2)
+x_label
+y_label
+ggplot(data=df.plot,aes(x=Axis.1,y=Axis.2))+
+  geom_point()+
+  theme_bw()+
+  theme(panel.grid = element_blank())+
+  geom_vline(xintercept = 0,lty="dashed")+
+  geom_hline(yintercept = 0,lty="dashed")+
+  labs(x=paste0("PCoA1 ",x_label,"%"),
+       y=paste0("PCoA2 ",y_label,"%"))
+
+df.plot$group<-ifelse(df.plot$Axis.1<0,"AAA","BBB")
+ggplot(data=df.plot,aes(x=Axis.1,y=Axis.2,
+                        color=group,shape=group))+
+  geom_point(size=5)+
+  theme_bw()+
+  theme(panel.grid = element_blank())+
+  geom_vline(xintercept = 0,lty="dashed")+
+  geom_hline(yintercept = 0,lty="dashed")+
+  labs(x=paste0("PCoA1 ",x_label,"%"),
+       y=paste0("PCoA2 ",y_label,"%"))+
+  stat_ellipse(data=df.plot,
+               geom = "polygon",
+               aes(fill=group),
+               alpha=0.3)+
+  scale_fill_manual(values = c("#e31a1c","#1f78b4"))+
+  scale_shape_manual(values = c(4, 19))
+
+#Calculation of cohesion
+
+spe <- read.delim('Species Abundance Table.txt', row.names = 1, sep = '\t', check.names = FALSE)
+g <- read.delim('Network adjacency matrix.txt', row.names = 1, sep = '\t', check.names = FALSE)
+
+r_pos <- c()
+r_neg <- c()
+spe_i <- c()
+
+for (i in names(g)) {
+  co <- na.omit(g[[i]])
+  r_pos <- c(r_pos, mean(co[co>0]))
+  r_neg <- c(r_neg, mean(co[co<0]))
+  spe_i <- c(spe_i, i)
+}
+r <- data.frame(spe_i, r_pos, r_neg)
+r
+
+C_pos <- c()
+C_neg <- c()
+sample <- c()
+
+for (j in names(spe)) {
+  C_pos <- c(C_pos, sum(spe[[j]]*r$r_pos))
+  C_neg <- c(C_neg, sum(spe[[j]]*r$r_neg))
+  sample <- c(sample, j)
+}
+C <- data.frame(sample, C_pos, C_neg)
+C
+
+#write.table(r, ' connectivity.txt', sep = '\t', row.names = FALSE, quote = FALSE)
+#write.table(C, 'coheison.txt', sep = '\t', row.names = FALSE, quote = FALSE)
+
+#Calculate correlation
+library(igraph)
+library(psych)
+library(Hmisc)
+
+otu = read.table("otu.txt", sep="\t", header=T, row.names=1)
+otu=t(otu)
+occor<-rcorr(as.matrix(otu),type = "spearman")
+occor.r = occor$r 
+occor.p = occor$P 
+#Multiple testing correction using Benjamini-Hochberg standard false discovery rate correction ("FDR-BH")
+#occor.p<-p.adjust(occor.p, method="BH")
+
+occor.r[occor.p>0.05] = 0
+occor.r[occor.p>0.05|abs(occor.r)<0.6] = 0
+
+write.csv(occor.r," R.csv")
+write.csv(occor.p," _p.occor.0.05.0.6.csv")
+library(reshape2)
+p_value=melt(occor.p)
+r_value=melt(occor.r)
+r_value<-as.matrix(r_value)
+m<-matrix(as.numeric(r_value[,3]),ncol = 1)
+r_value1<-cbind(r_value[,1:2],m)
+r_value1<-r_value1[-which(r_value1[,3]==0),]
+write.csv(r_value1,file = 'edge.csv')
+node1<-matrix(c(r_value1[,1],r_value1[,2]),ncol = 1)
+node2<-node1[!duplicated(node1)]
+write.csv(node2,file = 'node.csv')
+
+#Keystone filtering
+
+library(igraph)
+library(psych)
+library(sna)
+library(ggplot2)
+library(ggClusterNet)
+library(phyloseq)
+library(tidyverse)
+
+node_list <- read.csv('node.csv', row.names = 1, check.names = FALSE)
+edge_list <- read.csv('edge.csv', check.names = FALSE)
+
+igraph  = igraph::graph_from_data_frame(edge_list, directed = FALSE, vertices = node_list)
+res = ZiPiPlot(igraph = igraph,method = "cluster_fast_greedy")
+
+p <- res[[1]]
+p
+
+dat <- res[[2]]
+head(dat)
+write.csv(dat, 'dat.csv', row.names = FALSE, quote = FALSE)
+p + ggrepel::geom_text_repel(data = dat,aes(x = p,y = z,label = row.names(dat) ))
+
+#Screening of specialists and generalists
+
+library(vegan)
+generalists_specialists_partion <- function(tab, perm.n = 1000){
+  tab <- tab[, colSums(tab) > 0]
+  niche_caculate <- function(mat){
+    niche_value <- c()
+    for(i in 1:ncol(mat)){
+      P <- mat[,i] / sum(mat[,i])
+      niche_value[i] <- 1/sum(P^2)
+    }
+    names(niche_value) <- colnames(mat)
+    mat <- na.omit(mat)
+    return((niche_value))
+  }
+  obs_niche <- niche_caculate(tab)
+  
+  occurence <- apply(ceiling(tab/max(rowSums(tab))), 2, sum)/dim(tab)[2]
+  
+  mean_rela_abund <- apply(tab/max(rowSums(tab)), 2, mean)
+  
+  all_simulate_mat <- matrix(ncol=dim(tab)[2],nrow=perm.n)
+  
+  for(i in 1:perm.n){
+    sim_tab <- permatswap(tab, times = 1)$perm[[1]]
+    all_simulate_mat[i, ] <- niche_caculate(sim_tab)
+    cat(i/perm.n*100, "\r")
+  }
+  colnames(all_simulate_mat)<-colnames(tab)
+  all_simulate_mat <- as.data.frame(all_simulate_mat)
+  mean_niche <- apply(all_simulate_mat, 2, mean)
+  confidence_interval <-apply(all_simulate_mat,2,
+                              function(x){quantile(x, na.rm = T, probs=c(0.025, 0.975))})
+  Sign <- ifelse(obs_niche > confidence_interval[2, ], 'Generalist', 
+                 ifelse(obs_niche < confidence_interval[1, ], 'Specialist', 
+                        'Others'))
+  
+  stats <- data.frame(niche_value = obs_niche, 
+                      mean_niche = mean_niche,
+                      lowCI=confidence_interval[1,],
+                      uppCI=confidence_interval[2,],
+                      Sign = Sign,
+                      occurence = occurence,
+                      mean_rela_abund)
+  return((stats))
+}
+
+#Community construction analysis
+
+library(ggplot2)
+dt <- read.table("otu_Flattening.txt", comment.char = "", sep = "\t", row.names = 1, header = T)
+dt <- t(dt)
+res.stats <- generalists_specialists_partion(dt, perm.n = 1000)
+
+write.table(res.stats, file = 'zniche.stat.xls', row.names = T, sep = '\t', quote = FALSE, na = '')
+fig<-ggplot(res.stats, aes(log(mean_rela_abund), niche_value)) + geom_point(aes(color = Sign))
+
+write.table(res.stats, file = ' niche.stat.xls', row.names = T, sep = '\t', quote = FALSE, na = '')
+res.stats <- read.table("result.txt", comment.char = "", sep = "\t", row.names = 1, header = T)
+
+
+library(iCAMP)
+otu <- read.csv('otu.csv', header = TRUE,row.names = 1,check.names=F)
+otu <- data.frame(t(otu),check.names=F)
+tree <- read.tree('tree.nwk')
+tree <- prune.sample(otu, tree)
+
+pd <- cophenetic(tree)
+comm<-otu[,colnames(pd)]
+set.seed(123)
+qpen.out <- qpen(comm = comm, pd = pd, sig.bNTI = 2, sig.rc = 0.95, rand.time = 1000, nworker = 4)
+
+qpen.out$ratio  
+head(qpen.out$result) 
+write.csv(qpen.out, 'result.csv', row.names = FALSE)
